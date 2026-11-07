@@ -1,0 +1,14 @@
+# Simulated research assumptions, not measured exchange costs.
+exchange: binance
+markets: [BTC/USDT, ETH/USDT, SOL/USDT]
+primary_timeframe: 1d
+secondary_timeframe: 4h
+trading_mode: spot
+long_only: true
+starting_capital: 10000.0
+base_currency: USDT
+leverage: false
+live_trading: false
+fee_bps: 10.0
+slippage_bps: 5.0
+seed: 0
