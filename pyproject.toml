@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trading-bot"
+version = "0.1.0"
+description = "Typed foundations for reproducible cryptocurrency research"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = ["pydantic>=2.10,<3", "PyYAML>=6.0.2,<7"]
+
+[project.optional-dependencies]
+research = ["numpy>=2,<3", "pandas>=2.2,<3", "TA-Lib>=0.6.5,<0.7", "vectorbt>=0.28,<0.29", "scipy>=1.14,<2", "scikit-learn>=1.6,<2", "cvxpy>=1.6,<2", "pyarrow>=19,<24"]
+ingestion = ["ccxt>=4.4,<5"]
+
+[dependency-groups]
+dev = ["pytest>=8.3,<9", "pytest-cov>=6,<7", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6,<7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crypto_research"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --cov=crypto_research --cov-report=term-missing --cov-report=xml --cov-fail-under=90"
