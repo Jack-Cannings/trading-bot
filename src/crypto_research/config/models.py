@@ -6,10 +6,17 @@ from typing import Annotated, Literal, Self
 import yaml
 from pydantic import Field, model_validator
 
-from crypto_research.contracts import Identifier, Positive, Record, StrategyConfig, Timeframe
+from crypto_research.contracts import (
+    Identifier,
+    Positive,
+    Record,
+    StrategyConfig,
+    Timeframe,
+    TradingCosts,
+)
 
 
-class ResearchConfig(Record):
+class ResearchConfig(TradingCosts):
     exchange: Identifier
     markets: tuple[Annotated[str, Field(pattern=r"^[A-Z0-9]+/[A-Z0-9]+$")], ...] = Field(
         min_length=1
@@ -22,9 +29,6 @@ class ResearchConfig(Record):
     base_currency: Annotated[str, Field(pattern=r"^[A-Z0-9]+$")] = "USDT"
     leverage: Literal[False] = False
     live_trading: Literal[False] = False
-    # Required: evaluations must make cost assumptions explicitly.
-    fee_bps: Annotated[float, Field(ge=0, lt=10000, allow_inf_nan=False, strict=True)]
-    slippage_bps: Annotated[float, Field(ge=0, lt=10000, allow_inf_nan=False, strict=True)]
     seed: Annotated[int, Field(ge=0, strict=True)] = 0
 
     @model_validator(mode="after")
@@ -45,7 +49,7 @@ class ExperimentConfig(Record):
 
     @model_validator(mode="after")
     def unique_strategies(self) -> Self:
-        ids = [strategy.strategy_id for strategy in self.strategies]
+        ids = [strategy.identity for strategy in self.strategies]
         if len(ids) != len(set(ids)):
             raise ValueError(
                 "strategy configuration identifiers must be unique within an experiment"

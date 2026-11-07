@@ -25,3 +25,6 @@ Thumbs.db
 /artifacts/
 /logs/
 *.log
+
+.uv-cache/
+.test-tmp*/

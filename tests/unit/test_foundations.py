@@ -7,19 +7,27 @@ from pydantic import ValidationError
 from crypto_research.config.models import ExperimentConfig, load_config
 from crypto_research.contracts import (
     Candle,
+    DatasetReference,
+    DecisionInputs,
     ExperimentMetadata,
+    FutureOutcome,
     Market,
     MarketData,
+    MarketFeature,
     Parameter,
+    Period,
     ResultReference,
     SignalBatch,
     StrategyConfig,
+    StrategyPerformance,
     TargetExposure,
+    TradingCosts,
 )
-from crypto_research.strategies.base import Strategy
+from crypto_research.strategies.base import Strategy, reconstruct
 
 T = datetime(2025, 1, 1, tzinfo=UTC)
 M = Market(exchange="test", pair="BTC/USDT", timeframe="1d")
+D = DatasetReference(source="fixture", version="v1", sha256="c" * 64)
 
 
 def candle(**changes: object) -> Candle:
@@ -33,6 +41,8 @@ def candle(**changes: object) -> Candle:
         close=11.0,
         volume=0.0,
         complete=True,
+        available_at=T + timedelta(days=1),
+        dataset=D,
     )
     values.update(changes)
     return Candle.model_validate(values)
@@ -129,7 +139,11 @@ def test_utc_normalization() -> None:
 
 def test_history_validation() -> None:
     c = candle()
-    next_c = candle(open_time=T + timedelta(days=1), close_time=T + timedelta(days=2))
+    next_c = candle(
+        open_time=T + timedelta(days=1),
+        close_time=T + timedelta(days=2),
+        available_at=T + timedelta(days=2),
+    )
     assert len(MarketData(market=M, as_of=next_c.close_time, candles=(c, next_c)).candles) == 2
     for candles in [
         (next_c, c),
@@ -150,7 +164,7 @@ class StubStrategy:
 
     @property
     def config(self) -> StrategyConfig:
-        return StrategyConfig(strategy_id="stub")
+        return StrategyConfig(strategy_id="stub", version="1", market=M)
 
     def generate(self, history: MarketData) -> SignalBatch:
         return SignalBatch(config=self.config, history=history, signals=())
@@ -195,7 +209,7 @@ def test_invalid_signal(changes: dict[str, object]) -> None:
 
 
 def test_batch_alignment() -> None:
-    config = StrategyConfig(strategy_id="stub")
+    config = StrategyConfig(strategy_id="stub", version="1", market=M)
     s = signal()
     assert SignalBatch(config=config, history=history(), signals=(s,)).signals == (s,)
     for signals in [
@@ -217,9 +231,9 @@ def test_bad_parameters(value: object) -> None:
 
 def test_experiment_contracts() -> None:
     p = Parameter(name="period", value=10)
-    s = StrategyConfig(strategy_id="stub", parameters=(p,))
+    s = StrategyConfig(strategy_id="stub", version="1", market=M, parameters=(p,))
     with pytest.raises(ValidationError):
-        StrategyConfig(strategy_id="stub", parameters=(p, p))
+        StrategyConfig(strategy_id="stub", version="1", market=M, parameters=(p, p))
     config = load_config("configs/research.yaml")
     assert ExperimentConfig(experiment_id="run1", research=config, strategies=(s,)).strategies == (
         s,
@@ -231,7 +245,13 @@ def test_experiment_contracts() -> None:
         created_at=T,
         code_revision="a" * 40,
         config_sha256="b" * 64,
-        dataset_sha256="c" * 64,
+        strategies=(s,),
+        datasets=(D,),
+        training=Period(start=T, end=T + timedelta(days=1)),
+        validation=Period(start=T + timedelta(days=1), end=T + timedelta(days=2)),
+        test=Period(start=T + timedelta(days=2), end=T + timedelta(days=3)),
+        costs=TradingCosts(fee_bps=10.0, slippage_bps=5.0),
+        status="succeeded",
         seed=0,
     )
     assert m.created_at == T
@@ -240,3 +260,200 @@ def test_experiment_contracts() -> None:
     )
     with pytest.raises(ValidationError):
         Market(exchange="test", pair="bad", timeframe="1d")
+
+
+def test_publication_delay_and_revision() -> None:
+    delayed = candle(available_at=T + timedelta(days=2))
+    with pytest.raises(ValidationError, match="cutoff"):
+        MarketData(market=M, as_of=T + timedelta(days=1), candles=(delayed,))
+    h = MarketData(market=M, as_of=delayed.available_at, candles=(delayed,))
+    with pytest.raises(ValidationError, match="available"):
+        SignalBatch(config=StubStrategy().config, history=h, signals=(signal(),))
+    for when in [T - timedelta(seconds=1), T]:
+        with pytest.raises(ValidationError, match="availability|available"):
+            candle(available_at=when)
+    incomplete = candle(complete=False, available_at=T)
+    assert not incomplete.complete
+
+
+def test_historical_signals_and_replay() -> None:
+    first = history()
+    second_candle = candle(
+        open_time=T + timedelta(days=1),
+        close_time=T + timedelta(days=2),
+        available_at=T + timedelta(days=2),
+    )
+    second = MarketData(
+        market=M, as_of=second_candle.available_at, candles=(candle(), second_candle)
+    )
+    later = signal(
+        data_through=second_candle.close_time, generated_at=second.as_of, effective_at=second.as_of
+    )
+    batch = SignalBatch(config=StubStrategy().config, history=second, signals=(signal(), later))
+    assert batch.signals[0].generated_at < batch.signals[1].generated_at
+    replay = reconstruct(StubStrategy(), (first, second))
+    assert tuple(b.history.as_of for b in replay) == (first.as_of, second.as_of)
+    with pytest.raises(ValueError, match="increasing"):
+        reconstruct(StubStrategy(), (second, first))
+    wrong = StrategyConfig(
+        strategy_id="stub",
+        version="1",
+        market=Market(exchange="other", pair="BTC/USDT", timeframe="1d"),
+    )
+    with pytest.raises(ValidationError, match="configuration market"):
+        SignalBatch(config=wrong, history=first, signals=())
+
+
+def test_configuration_identity() -> None:
+    a, b = Parameter(name="a", value=1), Parameter(name="b", value=2)
+    first = StrategyConfig(strategy_id="stub", version="1", market=M, parameters=(a, b))
+    reordered = StrategyConfig(strategy_id="stub", version="1", market=M, parameters=(b, a))
+    assert first.identity == reordered.identity
+    assert first.canonical_json() == reordered.canonical_json()
+    updates: list[dict[str, object]] = [{"version": "2"}, {"parameters": (a,)}]
+    for update in updates:
+        assert StrategyConfig.model_validate(first.model_dump() | update).identity != first.identity
+    experiment = ExperimentConfig(
+        experiment_id="run1", research=load_config("configs/research.yaml"), strategies=(first,)
+    )
+    assert (
+        ExperimentConfig.model_validate_json(experiment.model_dump_json()).identity
+        == experiment.identity
+    )
+    with pytest.raises(ValidationError):
+        first.version = "changed"
+
+
+def test_features_performance_and_outcomes() -> None:
+    h = history()
+    feature = MarketFeature(
+        market=M, name="observation", version="1", value=0.5, data_through=T, available_at=h.as_of
+    )
+    period = Period(start=T, end=h.as_of)
+    performance = StrategyPerformance(
+        config=StubStrategy().config,
+        period=period,
+        available_at=h.as_of,
+        position=1.0,
+        target_exposure=0.5,
+        cash_allocation=100.0,
+        gross_return=0.02,
+        net_return=0.01,
+        trading_costs=1.0,
+        drawdown=0.1,
+        shadow=True,
+    )
+    inputs = DecisionInputs(history=h, features=(feature,), past_performance=(performance,))
+    assert inputs.past_performance[0].shadow
+    outcome = FutureOutcome(
+        decision=signal(),
+        horizon=Period(start=h.as_of, end=h.as_of + timedelta(days=1)),
+        available_at=h.as_of + timedelta(days=1),
+        net_return=0.02,
+        drawdown=0.1,
+    )
+    for field in ["features", "past_performance"]:
+        with pytest.raises(ValidationError):
+            DecisionInputs.model_validate({"history": h, field: (outcome,)})
+    with pytest.raises(ValidationError):
+        DecisionInputs.model_validate({"history": h, "outcomes": (outcome,)})
+    with pytest.raises(ValidationError, match="not yet available"):
+        DecisionInputs(
+            history=h,
+            past_performance=(
+                StrategyPerformance.model_validate(
+                    performance.model_dump() | {"available_at": outcome.available_at}
+                ),
+            ),
+        )
+    with pytest.raises(ValidationError, match="decision time"):
+        DecisionInputs(
+            history=h,
+            features=(
+                MarketFeature.model_validate(
+                    feature.model_dump() | {"available_at": outcome.available_at}
+                ),
+            ),
+        )
+    with pytest.raises(ValidationError, match="period end"):
+        StrategyPerformance.model_validate(performance.model_dump() | {"available_at": T})
+    for value in [float("nan"), float("inf")]:
+        with pytest.raises(ValidationError, match="finite"):
+            MarketFeature.model_validate(feature.model_dump() | {"value": value})
+    with pytest.raises(ValidationError, match="source data"):
+        MarketFeature.model_validate(feature.model_dump() | {"available_at": T - timedelta(days=1)})
+    with pytest.raises(ValidationError, match="horizon"):
+        FutureOutcome.model_validate(outcome.model_dump() | {"available_at": T})
+    with pytest.raises(ValidationError, match="start < end"):
+        Period(start=T, end=T)
+
+
+def experiment_metadata(**updates: object) -> ExperimentMetadata:
+    values: dict[str, object] = dict(
+        experiment_id="run1",
+        created_at=T,
+        code_revision="a" * 40,
+        config_sha256="b" * 64,
+        strategies=(StubStrategy().config,),
+        datasets=(D,),
+        training=Period(start=T, end=T + timedelta(days=1)),
+        validation=Period(start=T + timedelta(days=1), end=T + timedelta(days=2)),
+        test=Period(start=T + timedelta(days=2), end=T + timedelta(days=3)),
+        costs=TradingCosts(fee_bps=10.0, slippage_bps=5.0),
+        status="succeeded",
+    )
+    values.update(updates)
+    return ExperimentMetadata.model_validate(values)
+
+
+def test_failed_and_successful_experiments() -> None:
+    assert experiment_metadata().seed is None
+    assert experiment_metadata(status="failed", failure_reason="invalid input").status == "failed"
+    invalid: list[dict[str, object]] = [
+        {"status": "failed"},
+        {"failure_reason": "unexpected"},
+        {"validation": Period(start=T, end=T + timedelta(days=2))},
+        {
+            "artifacts": (
+                ResultReference(experiment_id="other", artifact_uri="result.json", sha256="d" * 64),
+            )
+        },
+    ]
+    for updates in invalid:
+        with pytest.raises(ValidationError):
+            experiment_metadata(**updates)
+
+
+@pytest.mark.parametrize("pair", ["btcusdt", "BTC-USDT", "btc/USDT", "BTC/USDT/ETH", "BTC/USDT\n"])
+def test_market_identifiers(pair: str) -> None:
+    with pytest.raises(ValidationError):
+        Market(exchange="test", pair=pair, timeframe="1d")
+
+
+def test_replay_rejects_wrong_snapshot_and_backdated_outputs() -> None:
+    original = history()
+    later = MarketData(market=M, as_of=original.as_of + timedelta(days=1), candles=original.candles)
+
+    class FixedOutput:
+        config = StubStrategy().config
+
+        def __init__(self, output: SignalBatch) -> None:
+            self.output = output
+
+        def generate(self, history: MarketData) -> SignalBatch:
+            return self.output
+
+    wrong_history = FixedOutput(
+        SignalBatch(config=StubStrategy().config, history=later, signals=())
+    )
+    with pytest.raises(ValueError, match="exact input"):
+        reconstruct(wrong_history, (original,))
+    backdated = FixedOutput(
+        SignalBatch(config=StubStrategy().config, history=later, signals=(signal(),))
+    )
+    with pytest.raises(ValueError, match="current snapshot"):
+        reconstruct(backdated, (later,))
+    current = FixedOutput(
+        SignalBatch(config=StubStrategy().config, history=original, signals=(signal(),))
+    )
+    assert reconstruct(current, (original,))[0].signals == (signal(),)

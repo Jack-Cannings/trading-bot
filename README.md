@@ -15,7 +15,7 @@ uv sync --locked
 
 Runtime only: `uv sync --locked --no-dev`. Optional future research dependencies:
 `uv sync --locked --extra research --extra ingestion`. NumPy, Pandas, TA-Lib,
-VectorBT, SciPy, scikit-learn and CVXPY belong to `research`; CCXT belongs to
+VectorBT, SciPy, scikit-learn, CVXPY and PyArrow belong to `research`; CCXT belongs to
 `ingestion`. Neither extra is imported by the foundation. The lock resolves all
 extras together; installing extras may require platform-specific binary wheels.
 Python is intentionally constrained to 3.12 until other versions are validated.
@@ -51,3 +51,22 @@ for deliberate sensitivity studies. No implicit zero costs are permitted.
 Unknown settings and duplicate YAML keys are rejected. Do not store credentials.
 
 See [architecture](docs/architecture.md) for contracts, limitations and next steps.
+
+## Reproducibility and contracts
+
+`uv.lock` pins the complete resolution, including optional dependencies. Runtime
+versions in this lock are Pydantic 2.14.3 and PyYAML 6.0.3. Development tools are
+pytest 8.4.2, pytest-cov 6.3.0, Ruff 0.17.4 and mypy 1.20.2. Build dependencies
+use the declared Hatchling compatibility range. Optional libraries are locked
+but are not installed or imported by the foundation's default environment.
+
+Configuration records expose `canonical_json()` and SHA-256 `identity`. Use
+`model_validate` or constructors at input boundaries; Pydantic's `model_construct`
+and `model_copy(update=...)` deliberately bypass validation and must not be used
+with untrusted data. UTC-normalized records can be exported with
+`model_dump(mode="python")` for future tabular tools without importing them now.
+
+Historical replay uses `strategies.base.reconstruct` with separate validated
+`MarketData` snapshots for each cutoff. Decision inputs and research-only
+`FutureOutcome` labels are distinct contracts; see the architecture for their
+availability and joining rules. The protocol does not sandbox strategy code.

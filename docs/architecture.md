@@ -1,129 +1,164 @@
 # Research architecture
 
-The objective is reproducible comparison of eight algorithms across forty initial
-configurations, prioritizing risk-adjusted returns and drawdown control. No
-algorithm or performance evaluation is implemented in this foundation.
+This foundation defines validated research records, YAML configuration and a
+strategy interface. It contains no indicators, trading algorithms, downloads,
+backtesting calculations, optimization, classifiers, predictive models, databases
+or execution clients. Python 3.12 is the initial supported interpreter.
 
 ```mermaid
 flowchart LR
-    Config[Validated YAML] --> Experiments[Experiment orchestration]
-    Sources[Future historical sources] --> Data[Validated UTC candles]
-    Data --> Strategy[Strategy Protocol]
-    Experiments --> Strategy
-    Strategy --> Signals[Validated target exposures]
-    Signals --> Backtest[Future execution simulation and accounting]
-    Backtest --> Metrics[Future performance metrics]
-    Metrics --> Validation[Future walk-forward validation]
-    Validation --> Portfolio[Future allocation research]
-    Experiments --> Artifacts[Metadata and result references]
-    Portfolio --> Paper[Future isolated paper-trading adapter]
+    Sources[Historical and live market data] --> Data[Versioned point-in-time snapshots]
+    Data --> Features[Shared observable features]
+    Data --> Strategies[Independent strategies]
+    Strategies --> Signals[Timestamped target exposures]
+    Signals --> Simulation[Simulation with explicit costs]
+    Simulation --> Performance[Observed strategy performance]
+    Signals --> Storage[Research experiment artifacts]
+    Performance --> Storage
+    Features --> Regimes[Observable market-regime analysis]
+    Features --> Selection[Adaptive strategy selection]
+    Regimes --> Selection
+    Performance --> Past[Only performance available at decision time]
+    Past --> Selection
+    Selection --> Allocation[Dynamic capital allocation]
+    Allocation --> Risk[Portfolio risk management]
+    Risk --> Paper[Paper trading]
+    Paper --> Execution[Eventual controlled execution]
+    Storage --> Labels[Research-only future outcome labels]
+    Labels --> Validation[Walk-forward model development]
+    Validation --> Selection
 ```
 
-## Package responsibilities
+The diagram describes intended boundaries, including components not implemented
+here. `config` loads settings; `contracts.py` defines shared records;
+`strategies/base.py` defines the protocol and point-in-time replay helper.
+Existing small package markers reserve data, backtesting, metrics, experiments,
+validation and portfolio responsibilities. Features, regimes and selection can
+become packages when their first implementations are needed.
 
-- `config`: typed YAML research and experiment settings.
-- `data`: future source adapters, normalization, provenance and storage boundaries.
-- `strategies`: pure signal-generation Protocol, independent of execution.
-- `backtesting`: future fills, fees, slippage, positions and cash accounting.
-- `metrics`: future returns, drawdown and risk-adjusted evaluation.
-- `experiments`: future run orchestration, immutable configuration snapshots and artifacts.
-- `validation`: future walk-forward splits and statistical robustness checks.
-- `portfolio`: future strategy and cryptocurrency allocation under risk constraints.
-- `utils`: reserved for small shared utilities when a real need appears.
-- `contracts.py`: shared immutable validated records. `py.typed` exposes typing to consumers.
+## Causal market data
 
-Only config, contracts and the strategy interface have behavior today. The other
-packages are placeholders. No database, cloud infrastructure or execution client
-is needed for these boundaries.
+A `Market` identifies exchange, uppercase base/quote pair and timeframe (`1d` or
+`4h`). A `Candle` carries source, dataset version and SHA-256 checksum through a
+`DatasetReference`. Prices are positive and finite, volume nonnegative, OHLC
+bounds consistent. Intervals are half-open `[open_time, close_time)` and must
+span exactly the declared timeframe. Naive datetimes are rejected; aware
+instants normalize to UTC in all records.
 
-## Market data and causal time
+Incomplete candles may be stored, but cannot enter `MarketData`. A completed
+candle cannot be available before its exclusive close. `available_at` is when
+that particular dataset vintage became usable, which may be later than close.
+A `MarketData` snapshot rejects data published after its `as_of` cutoff,
+mismatched markets, duplicate, reversed or overlapping candles. Gaps are allowed;
+future ingestion must investigate them rather than silently filling them.
+Revisions require their actual publication time and a new dataset reference;
+never backdate revised values to the original candle close.
 
-Future ingestion adapters normalize vendor identifiers and timestamps, retain raw
-provenance and validate candles before creating a history batch. Candle intervals
-are half-open `[open_time, close_time)`, with an exclusive close exactly one
-supported timeframe after opening. Initial timeframes are `1d` and `4h`; extend
-the explicit timeframe contract when additional intervals are needed. Prices are
-finite and positive, volume finite and nonnegative, and OHLC bounds consistent.
-Timezone-aware timestamps normalize to UTC; naive timestamps fail validation.
+These validations cannot establish that a vendor's declared availability time
+is truthful. Ingestion must preserve source evidence. Checksums are references,
+not verification that files exist or contain the claimed bytes.
 
-Incomplete candles can be represented but never enter `MarketData`. Histories
-contain one market and timeframe, at least one candle, and strictly chronological,
-unique, nonoverlapping intervals. Gaps are allowed and must be investigated by
-future ingestion; gaps are never silently filled here. A history cutoff `as_of`
-must be at or after every included close. Arrival delays and source revisions must
-be tracked by ingestion before an as-of dataset is constructed. The current model
-cannot prove that a provider actually published a candle by its nominal close.
+## Strategy configuration and historical reconstruction
 
-`model_dump(mode="python")` produces records usable with Pandas constructors;
-UTC-aware datetime fields and numeric scalars are compatible with Pandas and
-NumPy. Serialization is explicit: data libraries are not imported at runtime.
-Avoid Pydantic's unvalidated `model_construct` and `model_copy(update=...)` at
-external boundaries; use `model_validate` for all incoming data.
+`StrategyConfig` contains the strategy identifier, implementation/configuration
+version, market/timeframe and immutable named scalar parameters. Parameter names
+are unique and sorted. `canonical_json()` uses sorted object keys and normalized
+UTC; `identity` hashes that representation with SHA-256. Equivalent parameter
+order produces the same identity. An experiment can include parameter variants
+of the same strategy and separate market configurations; duplicate identities fail.
 
-## Strategies and exposures
+A strategy implements `config` and `generate(history) -> SignalBatch`. Evaluate
+one configuration per market/timeframe; reuse the same implementation for other
+markets. Generation must be deterministic, using only the supplied snapshot and
+configuration, without a wall clock, ambient randomness, network access or order
+submission. The protocol exposes no execution or optimizer capability. Python
+protocols cannot sandbox arbitrary implementations or prove determinism; each
+future strategy needs behavioral tests and a code review for hidden data access.
 
-A new algorithm implements `Strategy.config` and `generate(history)`; no changes
-to infrastructure are necessary. The config carries a unique implementation or
-configuration identifier and immutable named scalar parameters. An experiment
-requires unique configuration identifiers; use separate identifiers for parameter
-variants. Multi-market and multi-timeframe research orchestrates separate batches;
-strategies may explicitly combine validated histories through a future extension.
+`reconstruct` passes ordered snapshots separately to the strategy, checks output
+identity and requires each resulting decision to use that snapshot's cutoff.
+Construct each snapshot using the vintage available at that instant. Do not
+pass a full final dataset to a strategy and ask it to infer early decisions.
+The helper does not download or calculate market data or implement a strategy.
 
-Output is `SignalBatch` with fractional long-only target weights in `[0,1]`.
-Zero expresses flat exposure. No order objects or exchange clients are exposed.
-Each signal references an actual input candle close (`data_through`), the input
-cutoff (`generated_at`) and an execution eligibility timestamp (`effective_at`).
-Require `data_through <= generated_at <= effective_at`; output timestamps are
-unique and strictly ordered. Repeated inputs and config must produce identical
-serialized outputs. The runtime Protocol checks member presence, while mypy
-checks signatures; neither can prove a strategy is deterministic or side-effect
-free. Each future implementation needs behavioral tests. Use input cutoff time,
-never a wall clock or unseeded randomness.
+`TargetExposure` carries strategy, market, last data close used (`data_through`),
+decision time (`generated_at`), earliest execution eligibility (`effective_at`),
+long-only fractional target weight and optional strength. Require
+`data_through <= generated_at <= effective_at`. `SignalBatch` also checks that
+the referenced candle was available at that decision time and that effective
+timestamps are unique and chronological. A stored historical batch may contain
+different decision timestamps; they need not equal the final batch cutoff.
+Replay generation uses individual cutoffs to avoid exposing later data early.
 
-## Future simulation and accounting
+Eligibility does not imply a fill at an already observed candle price. Future
+simulation must specify executable prices and latency, conservatively using a
+subsequent executable observation. Per-signal weights do not constrain aggregate
+portfolio exposure; capital, turnover and concentration limits belong to risk
+management and accounting.
 
-Execution simulation consumes targets and applies explicit costs, liquidity and
-execution timing assumptions. Eligibility at a candle close never authorizes
-filling at a price already observed during that candle. A conservative default
-will use the next executable observation after the signal. Cash, positions,
-valuation currency, fees and slippage belong to accounting, separate from signal
-generation. Portfolio exposure and capital limits are enforced there; per-signal
-bounds alone do not constrain aggregate exposure.
+## Decision inputs and subsequent outcomes
 
-## Experiments and validation
+`MarketFeature` represents an observable named, versioned value, with source-data
+and availability timestamps. A retrospective regime classification is not an
+observable feature unless it can be reproduced using only information then
+available. No indicator calculations or regime classifications exist yet.
 
-An experiment config links settings and strategy variants. Metadata identifies
-code revision, configuration and dataset SHA-256 hashes, seed and UTC creation
-time. Result references identify artifact location and hash without introducing
-a storage engine. Future orchestration must persist the full config, environment,
-lockfile, dataset provenance, split boundaries and artifacts and verify hashes.
-The current records do not execute experiments or verify files on disk.
+`StrategyPerformance` records periodic gross/net returns, position, target
+exposure, cash allocation, trading costs and drawdown. `shadow=True` marks
+observed simulated performance for an inactive strategy. Availability must follow
+the measurement period. Cash and costs are in the experiment's base currency;
+returns and drawdowns are fractions, drawdown a nonnegative magnitude. Values
+are supplied by future accounting, not calculated or reconciled here.
 
-Walk-forward validation fits only on past training windows, selects on separate
-validation periods and evaluates on untouched forward periods. Purge overlapping
-labels and embargo boundaries where needed. Fit scaling, indicators requiring
-fitting and parameter selection inside training folds. Avoid using incomplete
-candles, revised data, same-bar fills, or full-sample normalization. Record every
-trial, account for multiple comparisons across forty configurations and later
-searches, test sensitivity to costs and regimes, and retain a final holdout.
-No metrics or robustness procedures are implemented yet.
+`DecisionInputs` accepts market history, observable features and already available
+performance records. Availability is bounded by the decision cutoff. It has no
+outcome field; unknown fields fail and `FutureOutcome` cannot validate as a
+feature or performance record. Cross-market historical performance can be used
+by a future selector, with its own market identity retained.
 
-Future allocation considers correlations across strategies and cryptocurrencies,
-turnover, concentration, drawdowns and exposure budgets. Optimize on training
-windows and validate allocation out of sample; do not optimize on final holdouts.
-Research and live trading remain separate. Paper trading precedes any explicitly
-authorized live adapter with independent risk controls and operational monitoring.
-The configuration currently rejects live trading, leverage and short selling.
+`FutureOutcome` is a separate research-only record referencing a full historical
+decision. Future research code will join labels by the decision's canonical
+identity, specify a forward half-open horizon beginning no earlier than execution
+eligibility, and attach net returns/drawdowns only after the horizon completes
+and the required data is available. Store labels separately from decision-input
+artifacts. A future training builder may join them offline; live selection must
+accept only `DecisionInputs`, never the joined training records. Purge labels
+whose horizons overlap validation/test boundaries and embargo when appropriate.
+No label generation or predictive dataset builder is implemented in this task.
 
-## Development sequence
+## Experiments and research process
 
-1. Historical market-data ingestion.
-2. Backtesting and portfolio accounting.
-3. Performance metrics.
-4. Research experiment framework.
-5. Eight trading algorithms.
-6. Automated comparison of 40 initial configurations.
-7. Statistical robustness and strategy improvement.
-8. Multi-strategy portfolio optimization.
-9. Paper trading.
-10. Monitoring, reliability and live-readiness validation.
+`ExperimentConfig` snapshots research settings and strategy configurations; its
+identity includes parameters, markets, costs and seed. `ExperimentMetadata`
+references that identity, full strategy configs, code revision, dataset sources,
+versions/checksums, ordered nonoverlapping training/validation/test intervals,
+optional seed, explicit cost assumptions and result artifacts. Failed runs must
+record a failure reason; successful runs cannot carry one. Artifact experiment
+identifiers must match. Persist the full experiment config, metadata, lockfile
+and environment alongside artifacts in future orchestration, and verify hashes
+when loading. No storage system or experiment execution is implemented here.
+
+The planned research loop is:
+
+1. Develop one algorithm with explicit, versioned parameters.
+2. Reconstruct causal decisions from point-in-time snapshots.
+3. Backtest with realistic fees, slippage and execution timing.
+4. Capture decisions, costs and subsequent performance, including shadow runs.
+5. Compare across cryptocurrencies and observable conditions.
+6. Apply walk-forward training, validation and untouched forward tests.
+7. Evaluate incremental contribution, correlations and turnover in a combined portfolio.
+8. Build point-in-time research datasets for adaptive selection and capital allocation.
+
+Fit preprocessing and parameter/model selection only within training folds.
+Keep future outcome labels out of decision inputs. Avoid revised-data leakage,
+full-sample normalization, same-bar fills and incomplete candles. Record both
+successful and unsuccessful trials, account for multiple comparisons, test cost
+and parameter sensitivity, and retain a final untouched holdout. Merely defining
+nonoverlapping periods does not implement these safeguards or prove a strategy
+is free of leakage or overfitting.
+
+Selection and capital allocation remain separate from signal generation.
+Portfolio risk management will enforce budgets and drawdown limits. Extensive
+historical and forward testing, followed by paper trading, must precede any
+controlled execution integration. Current config rejects live trading, leverage,
+short selling and modes other than spot. No credentials are needed or stored.
