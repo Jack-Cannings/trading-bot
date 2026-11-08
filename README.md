@@ -3,8 +3,8 @@
 Python 3.12 cryptocurrency quantitative research infrastructure. The package is
 `crypto_research`. It provides validated contracts, configuration, public Binance
 OHLCV ingestion, immutable local Parquet storage and deterministic offline
-portfolio backtesting. It contains no trading algorithms, real order submission
-or profitability claims.
+portfolio backtesting, performance analytics and a local SQLite research registry.
+It contains no trading algorithms, real order submission or profitability claims.
 
 ## Installation
 
@@ -125,3 +125,27 @@ uv run --offline --no-sync pytest tests/integration/test_vectorbt_reference.py -
 
 The default environment skips that comparison; CI also runs it in a separate
 Linux reference job. VectorBT and Plotly are not imported by the engine.
+
+## Research experiments and metrics
+
+```sh
+uv run --offline --no-sync python -m crypto_research.experiments.cli run-demo
+uv run --offline --no-sync python -m crypto_research.experiments.cli list
+uv run --offline --no-sync python -m crypto_research.experiments.cli compare
+uv run --offline --no-sync python -m crypto_research.experiments.cli show EXPERIMENT_ID
+```
+
+The synthetic demo evaluates one predetermined fixture plus cash/buy-and-hold
+benchmarks. Each attempt is preserved in `research/experiments.sqlite`, with
+immutable checksummed JSON/Parquet artifacts under `research/artifacts/RUN_ID/`.
+Research outputs are ignored by Git. Runs require explicit costs and exact source
+dataset versions; failures and interruptions remain visible. No new dependencies
+or exchange connectivity are needed.
+
+See [the research guide](docs/research.md) for metric formulas, daily/four-hour
+annualization, undefined values, dataset schemas, reproducibility and lifecycle
+rules. Observable trailing features and causal decisions are stored separately
+from 1/7/30-day future strategy outcomes. Outcomes use simulated account returns,
+not future coin-price returns. Independent shadow strategies are not treated as
+an executable combined portfolio. Comparison groups flag different inputs and
+assumptions; the report does not select a winner.

@@ -1,1 +1,1 @@
-"""Validation package; see architecture documentation."""
+"""Research dataset causality, identity and label-window validation."""

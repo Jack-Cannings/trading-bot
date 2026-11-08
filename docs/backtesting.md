@@ -256,3 +256,14 @@ in separate records. This task supports one instruction per market; it does not
 implement capital selection, sleeve accounting, optimizer logic, advanced
 statistics, experiment orchestration or strategy ranking. Those extensions must
 preserve the decision/outcome boundary and shared cash/risk invariants.
+
+## Research export integration
+
+The research layer now records metrics, independent trials and separate causal
+inputs/future labels; see [the research guide](research.md). Optional additive
+`EquityPoint.pre_execution_equity` and `pre_execution_gross_equity` fields expose
+marked account equity before executions at each event, allowing half-open outcome
+intervals to include entry costs and exclude end-boundary transactions without
+reconstructing portfolio accounting. `BacktestResult.data_gaps` records missing
+source candle coverage within the simulated period. Legacy records can still be
+read, but labels without exact pre-execution endpoints remain incomplete.
