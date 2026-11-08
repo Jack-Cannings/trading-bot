@@ -207,7 +207,9 @@ def _rows(
             preceding_exposure=d.preceding_exposure,
             signal_strength=d.signal.strength,
             momentum=d.signal.strength if d.config.strategy_id == "time_series_momentum" else None,
-            lookback=next((p.value for p in d.config.parameters if p.name == "lookback"), None),
+            lookback=next((p.value for p in d.config.parameters if p.name == "lookback"), None)
+            if d.config.strategy_id == "time_series_momentum"
+            else None,
             feature_schema=d.features.schema_version,
             record_json=d.canonical_json(),
         )

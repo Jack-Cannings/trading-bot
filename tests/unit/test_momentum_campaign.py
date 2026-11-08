@@ -402,3 +402,26 @@ def test_archival_signals_wait_for_next_open_and_source_remains_observed(tmp_pat
         point.cash >= 0 and point.equity == point.cash + point.holdings_value
         for point in result.equity
     )
+
+
+def test_momentum_projection_preserves_other_strategy_parameter_types(tmp_path: Path) -> None:
+    from crypto_research.backtesting.models import Instruction, PortfolioTarget
+    from crypto_research.contracts import Parameter, StrategyConfig
+
+    source, registry, runner, spec, targets = case(tmp_path)
+    config = StrategyConfig.model_validate(
+        spec.strategy.model_dump()
+        | {
+            "parameters": (Parameter(name="lookback", value="calendar-month"),),
+        }
+    )
+    spec = renamed(spec, "generic-string-parameter", strategy=config)
+    instruction = Instruction.model_validate(
+        targets[0].instructions[0].model_dump() | {"config": config}
+    )
+    execution = runner.execute(spec, targets=(PortfolioTarget(instructions=(instruction,)),))
+    assert execution.manifest_sha256
+    rows = runner.artifacts.table(
+        execution.run_id, "decisions", expected_sha=execution.manifest_sha256
+    ).to_pylist()
+    assert rows[0]["lookback"] is None and rows[0]["momentum"] is None
