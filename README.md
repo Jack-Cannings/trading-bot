@@ -149,3 +149,22 @@ from 1/7/30-day future strategy outcomes. Outcomes use simulated account returns
 not future coin-price returns. Independent shadow strategies are not treated as
 an executable combined portfolio. Comparison groups flag different inputs and
 assumptions; the report does not select a winner.
+
+## Time-series momentum
+
+```sh
+uv run --offline --no-sync python -m crypto_research.experiments.cli run-momentum --fixture
+```
+
+The first directional strategy evaluates only the five predefined daily lookbacks
+30/60/90/120/180: positive momentum targets long, otherwise cash. The fixed campaign
+includes BTC/ETH/SOL, cash/passive/risk-target benchmarks, doubled costs,
+chronological validation and a protected final holdout. Explicit immutable dataset
+versions are required for real data; the runner never downloads. Synthetic mode
+is labeled throughout. A named optional archival publication assumption preserves
+raw acquisition timestamps and reports its historical-vintage limitations.
+
+Read [the momentum guide](docs/momentum.md) for exact formulas, acquisition and
+campaign commands, availability policies, split rules, artifacts and limitations.
+Reports are generated under `research/reports/time_series_momentum/`; plotting uses
+Matplotlib with a noninteractive backend. No lookback is automatically selected.

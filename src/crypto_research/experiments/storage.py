@@ -129,6 +129,15 @@ SCHEMAS = {
         metadata={b"schema_version": b"1", b"kind": b"trades"},
     ),
 }
+LEGACY_SCHEMAS = SCHEMAS.copy()
+SCHEMAS["decisions"] = pa.schema(
+    list(SCHEMAS["decisions"]) + [("momentum", pa.float64()), ("lookback", pa.int32())],
+    metadata={b"schema_version": b"2", b"kind": b"decisions"},
+)
+SCHEMAS["performance"] = pa.schema(
+    list(SCHEMAS["performance"]) + [("quantity_before", pa.string())],
+    metadata={b"schema_version": b"2", b"kind": b"performance"},
+)
 
 
 def checksum(path: Path) -> str:
@@ -197,6 +206,8 @@ def _rows(
             target_exposure=d.signal.weight,
             preceding_exposure=d.preceding_exposure,
             signal_strength=d.signal.strength,
+            momentum=d.signal.strength if d.config.strategy_id == "time_series_momentum" else None,
+            lookback=next((p.value for p in d.config.parameters if p.name == "lookback"), None),
             feature_schema=d.features.schema_version,
             record_json=d.canonical_json(),
         )
@@ -230,6 +241,7 @@ def _rows(
     with localcontext(Context(prec=60)):
         previous_net = previous_gross = amount(spec.settings.starting_capital)
     previous_fees, previous_slippage, previous_turnover = Decimal(0), Decimal(0), Decimal(0)
+    previous_quantity = Decimal(0)
     for point in result.equity:
         position = next((p for p in point.positions if p.market == spec.strategy.market), None)
         performance_rows.append(
@@ -253,6 +265,7 @@ def _rows(
                 slippage_cumulative=str(point.slippage_paid),
                 turnover_cumulative=str(point.turnover),
                 quantity=str(position.quantity if position else Decimal(0)),
+                quantity_before=str(previous_quantity),
                 target_exposure=float(position.target_weight) if position else 0.0,
                 actual_exposure=float(position.actual_weight) if position else 0.0,
                 fees=_difference(point.fees_paid, previous_fees),
@@ -264,6 +277,7 @@ def _rows(
         if previous_time is not None:
             previous_net, previous_gross = point.equity, point.gross_equity
         previous_time = point.timestamp
+        previous_quantity = position.quantity if position else Decimal(0)
         previous_fees, previous_slippage, previous_turnover = (
             point.fees_paid,
             point.slippage_paid,
@@ -385,10 +399,13 @@ class ResearchStore:
             path = root / artifact.name
             if path.stat().st_size != artifact.size or checksum(path) != artifact.sha256:
                 raise ValueError(f"research artifact checksum mismatch: {artifact.name}")
-            if path.suffix == ".parquet" and not pq.read_schema(path).equals(
-                SCHEMAS[path.stem], check_metadata=True
-            ):
-                raise ValueError("research Parquet schema mismatch")
+            if path.suffix == ".parquet":
+                actual = pq.read_schema(path)
+                if not any(
+                    actual.equals(schemas[path.stem], check_metadata=True)
+                    for schemas in (SCHEMAS, LEGACY_SCHEMAS)
+                ):
+                    raise ValueError("research Parquet schema mismatch")
         if not full:
             if expected_sha is None:
                 raise ValueError("filtered reads require the registered manifest checksum")
@@ -446,6 +463,7 @@ class ResearchStore:
             raise ValueError("performance metrics do not match simulated equity")
         expected_rows = _rows(spec, result, run_id, decision_records, labels)
         for kind, schema in SCHEMAS.items():
+            schema = pq.read_schema(root / f"{kind}.parquet")
             expected = pa.Table.from_pylist(expected_rows[kind], schema=schema)
             if not pq.read_table(root / f"{kind}.parquet").equals(expected, check_metadata=True):
                 raise ValueError("research table columns disagree with validated records")

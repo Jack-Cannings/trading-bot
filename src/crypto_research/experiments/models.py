@@ -28,11 +28,15 @@ class ExperimentSpec(Record):
     outcome_days: tuple[Annotated[int, Field(gt=0, le=3650, strict=True)], ...] = (1, 7, 30)
     allow_data_gaps: bool = False
     strategy_lookback_days: Literal[201] = 201
+    replay_availability: Literal["observed", "archival-close-plus-60s"] = "observed"
+    information_end: datetime | None = None
 
     @model_validator(mode="after")
     def consistent(self) -> Self:
         if self.settings.experiment_id != self.experiment_id:
             raise ValueError("experiment identity differs from simulation settings")
+        if self.information_end is not None and self.settings.period.end > self.information_end:
+            raise ValueError("evaluation cannot enter the protected information boundary")
         if len(self.outcome_days) != len(set(self.outcome_days)):
             raise ValueError("outcome horizons must be unique")
         object.__setattr__(self, "outcome_days", tuple(sorted(self.outcome_days)))
@@ -41,6 +45,10 @@ class ExperimentSpec(Record):
     @property
     def input_hash(self) -> str:
         data = self.model_dump(mode="json")
+        if self.replay_availability == "observed":
+            data.pop("replay_availability")
+        if self.information_end is None:
+            data.pop("information_end")
         data.pop("experiment_id")
         data["settings"].pop("experiment_id")
         return hashlib.sha256(
@@ -50,6 +58,10 @@ class ExperimentSpec(Record):
     @property
     def comparison_group(self) -> str:
         data = self.model_dump(mode="json", exclude={"experiment_id", "strategy", "seed", "mode"})
+        if self.replay_availability == "observed":
+            data.pop("replay_availability")
+        if self.information_end is None:
+            data.pop("information_end")
         data["market"] = self.strategy.market.model_dump(mode="json")
         data["settings"].pop("experiment_id")
         return hashlib.sha256(

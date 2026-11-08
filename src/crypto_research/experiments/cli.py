@@ -137,6 +137,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     demo = commands.add_parser("run-demo")
     demo.add_argument("--revision", help="declared code SHA; defaults to current Git HEAD")
+    momentum = commands.add_parser(
+        "run-momentum", help="offline fixed momentum campaign; never downloads"
+    )
+    momentum.add_argument("--revision", help="declared code SHA; defaults to current Git HEAD")
+    momentum.add_argument("--config", type=Path, default=Path("configs/research.yaml"))
+    momentum.add_argument("--dataset", action="append", default=[], metavar="PAIR=VERSION")
+    momentum.add_argument(
+        "--archival-close-plus-60s",
+        action="store_true",
+        help="assume finalized daily bars published after 60s; preserve raw observation timestamps",
+    )
+    momentum.add_argument(
+        "--fixture",
+        action="store_true",
+        help="explicit synthetic campaign, not real market evidence",
+    )
+    momentum.add_argument("--plan", type=Path, help="replay an immutable saved campaign plan")
     commands.add_parser("list")
     commands.add_parser("compare")
     show = commands.add_parser("show")
@@ -146,7 +163,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         registry = Registry(args.root)
-        if args.command == "run-demo":
+        if args.command == "run-momentum":
+            from crypto_research.config.models import load_config
+            from crypto_research.experiments.momentum_campaign import execute_campaign
+            from crypto_research.experiments.momentum_fixtures import fixture_versions
+            from crypto_research.experiments.momentum_plan import PAIRS, CampaignPlan, make_plan
+
+            source = Store(args.data_root)
+            if args.plan:
+                if args.dataset or args.fixture or args.archival_close_plus_60s or args.revision:
+                    raise ValueError("saved plan cannot be combined with parameter overrides")
+                plan = CampaignPlan.model_validate_json(args.plan.read_text(encoding="utf-8"))
+            else:
+                revision = (
+                    args.revision
+                    or subprocess.run(
+                        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+                    ).stdout.strip()
+                )
+                versions = {}
+                for value in args.dataset:
+                    pair, separator, version = value.partition("=")
+                    if not separator or pair not in PAIRS or pair in versions:
+                        raise ValueError(
+                            "datasets must be unique PAIR=VERSION entries for BTC, ETH and SOL/USDT"
+                        )
+                    versions[pair] = version
+                if args.fixture:
+                    if versions:
+                        raise ValueError("synthetic fixture mode cannot use real dataset overrides")
+                    versions = fixture_versions(source)
+                plan = make_plan(
+                    source,
+                    versions,
+                    revision,
+                    load_config(args.config),
+                    archival=args.archival_close_plus_60s,
+                    fixture=args.fixture,
+                )
+            print(execute_campaign(plan, source, registry))
+        elif args.command == "run-demo":
             revision = args.revision
             if revision is None:
                 revision = subprocess.run(

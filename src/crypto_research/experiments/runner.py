@@ -1,6 +1,7 @@
 """Narrow isolated-strategy orchestration over exact immutable source versions."""
 
 from collections.abc import Iterator
+from datetime import timedelta
 from decimal import Decimal
 
 import pandas as pd
@@ -8,7 +9,7 @@ import pandas as pd
 from crypto_research.backtesting.benchmarks import buy_and_hold
 from crypto_research.backtesting.engine import PreparedData, replay_targets, run
 from crypto_research.backtesting.models import PortfolioTarget
-from crypto_research.contracts import DatasetReference, MarketData
+from crypto_research.contracts import Candle, DatasetReference, MarketData, Period
 from crypto_research.data.storage import Store
 from crypto_research.experiments.models import Execution, ExperimentSpec
 from crypto_research.experiments.registry import Registry
@@ -27,11 +28,14 @@ class Runner:
         self.features = FeatureCache()
         self._data: dict[str, PreparedData] = {}
         self._quality: dict[str, str] = {}
+        self._feature_caches: dict[str, FeatureCache] = {"observed": self.features}
 
     def _load(self, spec: ExperimentSpec) -> PreparedData:
-        version = spec.dataset.version
+        policy = spec.replay_availability + ":" + str(spec.information_end)
+        version = spec.dataset.version + ":" + policy
+        self.features = self._feature_caches.setdefault(policy, FeatureCache())
         if version not in self._data:
-            manifest, _, report = self.source.read(version)
+            manifest, rows, report = self.source.read(spec.dataset.version)
             expected = DatasetReference(
                 source=manifest.provider, version=manifest.version, sha256=manifest.dataset_id
             )
@@ -42,12 +46,36 @@ class Runner:
             ):
                 raise ValueError("source dataset has unresolved quality anomalies")
             history = self.source.load(
-                version,
+                spec.dataset.version,
                 market=spec.strategy.market,
-                period=manifest.request.period,
+                period=Period(
+                    start=manifest.request.period.start,
+                    end=min(manifest.request.period.end, spec.information_end)
+                    if spec.information_end
+                    else manifest.request.period.end,
+                ),
                 as_of=manifest.acquired_at,
                 allow_gaps=spec.allow_data_gaps,
             )
+            if spec.replay_availability == "archival-close-plus-60s":
+                if history.market.timeframe != "1d":
+                    raise ValueError("archival availability model is daily only")
+                # Explicit research assumption, NEVER rewrite raw observed_at or its hashes.
+                history = MarketData(
+                    market=history.market,
+                    as_of=max(
+                        manifest.acquired_at, history.candles[-1].close_time + timedelta(seconds=60)
+                    ),
+                    candles=tuple(
+                        Candle.model_validate(
+                            c.model_dump()
+                            | {
+                                "available_at": c.close_time + timedelta(seconds=60),
+                            }
+                        )
+                        for c in history.candles
+                    ),
+                )
             self.features.register(history, spec.dataset)
             self._data[version] = PreparedData((history,))
             self._quality[version] = report.status
@@ -65,9 +93,16 @@ class Runner:
         *,
         strategy: Strategy | None = None,
         targets: tuple[PortfolioTarget, ...] | None = None,
+        execution_id: str | None = None,
     ) -> Execution:
         self.registry.register(spec)
-        execution = self.registry.create_run(spec.experiment_id)
+        execution = (
+            self.registry.get(execution_id)
+            if execution_id
+            else self.registry.create_run(spec.experiment_id)
+        )
+        if execution.experiment_id != spec.experiment_id or execution.status != "created":
+            raise ValueError("preallocated execution must be created for this exact experiment")
         self.registry.transition(execution.run_id, "running")
         try:
             data = self._load(spec)

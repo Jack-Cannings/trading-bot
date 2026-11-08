@@ -273,3 +273,20 @@ identify incompatible assumptions and overlapping evaluation periods; label-spli
 validation rejects cross-fold overlapping horizons. No statistical significance
 or automatic promotion is claimed. See [the research guide](research.md) for
 formulas, schemas, commands and practical limits.
+
+## Fixed momentum campaign
+
+The daily binary momentum implementation uses the original Strategy protocol.
+The fixed passive risk-target comparator is isolated from directional strategy
+logic. Campaign orchestration declares its plan before execution, records every
+trial in the existing registry database, then delegates all simulations, metrics
+and artifact publication to the existing Runner. Reporting performs offline
+decision/outcome joins after simulations; outcomes are never strategy inputs.
+
+Default replay still uses observation timestamps. An explicit experiment-level
+`archival-close-plus-60s` model supports conditional finalized-data simulations
+without editing raw observation times. Policy and protected information boundaries
+participate in hashes and separate caches. The runner removes heldout candles from
+both broker and feature tapes. Decisions/performance schema 2 add momentum/lookback
+and before-execution quantities; schema 1 readers and default experiment hashes
+remain supported. See [momentum research](momentum.md) for assumptions and limits.

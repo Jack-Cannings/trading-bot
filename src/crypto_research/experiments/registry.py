@@ -67,7 +67,7 @@ class Registry:
                 "SELECT spec_json FROM experiments WHERE experiment_id=?", (spec.experiment_id,)
             ).fetchone()
             if previous:
-                if previous["spec_json"] != spec.canonical_json():
+                if ExperimentSpec.model_validate_json(previous["spec_json"]) != spec:
                     raise ValueError(
                         "experiment configurations are immutable; choose a new experiment ID"
                     )

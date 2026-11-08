@@ -1503,6 +1503,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "ccxt" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -1544,6 +1545,7 @@ requires-dist = [
     { name = "ccxt", specifier = ">=4.4,<5" },
     { name = "ccxt", marker = "extra == 'ingestion'", specifier = ">=4.4,<5" },
     { name = "cvxpy", marker = "extra == 'research'", specifier = ">=1.6,<2" },
+    { name = "matplotlib", specifier = ">=3.9,<4" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "numpy", marker = "extra == 'research'", specifier = ">=2,<3" },
     { name = "pandas", specifier = ">=2.2,<3" },
