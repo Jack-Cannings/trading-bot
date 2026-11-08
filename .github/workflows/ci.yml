@@ -20,3 +20,8 @@ jobs:
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync mypy
       - run: uv run --offline --no-sync pytest
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.xml

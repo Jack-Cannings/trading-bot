@@ -1,8 +1,9 @@
 # trading-bot
 
-Python 3.12 foundations for cryptocurrency quantitative research. The package is
-`crypto_research`. This project contains contracts and configuration only; it does
-not ingest market data, backtest, submit orders, or claim profitable results.
+Python 3.12 cryptocurrency quantitative research infrastructure. The package is
+`crypto_research`. It provides validated contracts, configuration, public Binance
+OHLCV ingestion and immutable local Parquet storage. It contains no strategies,
+backtesting calculations, order submission or profitability claims.
 
 ## Installation
 
@@ -13,11 +14,11 @@ then from a checkout run:
 uv sync --locked
 ```
 
-Runtime only: `uv sync --locked --no-dev`. Optional future research dependencies:
-`uv sync --locked --extra research --extra ingestion`. NumPy, Pandas, TA-Lib,
-VectorBT, SciPy, scikit-learn, CVXPY and PyArrow belong to `research`; CCXT belongs to
-`ingestion`. Neither extra is imported by the foundation. The lock resolves all
-extras together; installing extras may require platform-specific binary wheels.
+Runtime only: `uv sync --locked --no-dev`. CCXT, NumPy, Pandas and PyArrow are
+now runtime dependencies for data work. Optional future research dependencies:
+`uv sync --locked --extra research` includes TA-Lib, VectorBT, SciPy, scikit-learn
+and CVXPY. The existing `ingestion` extra remains compatible. The lock resolves
+all extras together; installing research extras may need platform-specific wheels.
 Python is intentionally constrained to 3.12 until other versions are validated.
 
 ## Development and checks
@@ -57,8 +58,9 @@ See [architecture](docs/architecture.md) for contracts, limitations and next ste
 `uv.lock` pins the complete resolution, including optional dependencies. Runtime
 versions in this lock are Pydantic 2.14.3 and PyYAML 6.0.3. Development tools are
 pytest 8.4.2, pytest-cov 6.3.0, Ruff 0.17.4 and mypy 1.20.2. Build dependencies
-use the declared Hatchling compatibility range. Optional libraries are locked
-but are not installed or imported by the foundation's default environment.
+use the declared Hatchling compatibility range. Data versions are CCXT 4.5.92,
+NumPy 2.5.4, Pandas 2.3.3 and PyArrow 23.0.1. Remaining optional research
+libraries are locked but are not installed by default.
 
 Configuration records expose `canonical_json()` and SHA-256 `identity`. Use
 `model_validate` or constructors at input boundaries; Pydantic's `model_construct`
@@ -70,3 +72,27 @@ Historical replay uses `strategies.base.reconstruct` with separate validated
 `MarketData` snapshots for each cutoff. Decision inputs and research-only
 `FutureOutcome` labels are distinct contracts; see the architecture for their
 availability and joining rules. The protocol does not sandbox strategy code.
+
+## Historical market data
+
+See [the market-data guide](docs/market-data.md) for downloading BTC, ETH and SOL
+on daily and four-hour timeframes, updates, quality checks, manifests, checksums,
+restart points and the optional live smoke test.
+
+```sh
+uv run python -m crypto_research.data.cli download --market BTC/USDT ETH/USDT SOL/USDT --timeframe 1d 4h --start 2022-01-01 --end 2023-01-01
+uv run python -m crypto_research.data.cli list
+uv run python -m crypto_research.data.cli quality VERSION
+uv run python -m crypto_research.data.cli update VERSION --end 2023-02-01 --overlap 3
+```
+
+Commands explicitly opt into public exchange requests. No credentials are used.
+Dates mean UTC midnight; requested open-time intervals are `[start,end)`. Immutable
+Parquet, JSON manifests and quality reports live under `data/versions/VERSION/`
+and are ignored by Git. Missing data is reported, never filled. Normal tests block
+network access; the live smoke test is skipped without `--live-binance`.
+
+Historical REST data cannot establish original publication time. Research loaders
+use recorded exchange observation times and require an explicit cutoff. Data
+observed today cannot be used at yesterday's cutoff; prospective vintages or an
+explicit, justified availability model are needed for strict early-period replay.

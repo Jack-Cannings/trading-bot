@@ -1,9 +1,10 @@
 # Research architecture
 
-This foundation defines validated research records, YAML configuration and a
-strategy interface. It contains no indicators, trading algorithms, downloads,
-backtesting calculations, optimization, classifiers, predictive models, databases
-or execution clients. Python 3.12 is the initial supported interpreter.
+The platform defines validated research records, YAML configuration, a strategy
+interface and historical public market-data ingestion with immutable local
+Parquet storage. It contains no indicators, trading algorithms, backtesting
+calculations, optimization, classifiers, predictive models, databases or execution
+clients. Python 3.12 is the initial supported interpreter.
 
 ```mermaid
 flowchart LR
@@ -32,6 +33,8 @@ flowchart LR
 The diagram describes intended boundaries, including components not implemented
 here. `config` loads settings; `contracts.py` defines shared records;
 `strategies/base.py` defines the protocol and point-in-time replay helper.
+`data` implements provider boundaries, validation, immutable storage, incremental
+updates and an explicit CLI; see [market-data design](market-data.md).
 Existing small package markers reserve data, backtesting, metrics, experiments,
 validation and portfolio responsibilities. Features, regimes and selection can
 become packages when their first implementations are needed.
@@ -136,7 +139,8 @@ optional seed, explicit cost assumptions and result artifacts. Failed runs must
 record a failure reason; successful runs cannot carry one. Artifact experiment
 identifiers must match. Persist the full experiment config, metadata, lockfile
 and environment alongside artifacts in future orchestration, and verify hashes
-when loading. No storage system or experiment execution is implemented here.
+when loading. Experiment execution/storage is not implemented here; the separate market-data
+store now verifies persisted dataset versions and their Parquet content.
 
 The planned research loop is:
 
@@ -162,3 +166,29 @@ Portfolio risk management will enforce budgets and drawdown limits. Extensive
 historical and forward testing, followed by paper trading, must precede any
 controlled execution integration. Current config rejects live trading, leverage,
 short selling and modes other than spot. No credentials are needed or stored.
+
+## Historical-data implementation
+
+The data provider is independent of validation, storage and research consumers.
+Only Binance public spot is implemented; no exchange substitution is permitted.
+Downloader pagination uses returned candle opens, bounded retry/backoff and the
+CCXT limiter. Completion and observation times use exchange server timestamps;
+the local wall clock is never substituted. The validation pipeline reports
+missing/invalid observations and produces clean, incomplete or invalid quality.
+
+The store atomically publishes immutable per-market/timeframe version directories
+containing Parquet observations, a JSON manifest and a quality report. Logical
+OHLCV content identity is independent of acquisition batching and differs from
+artifact-byte identity. Updates preserve old versions, recent-overlap corrections,
+earlier availability for unchanged values, unresolved old anomalies and gap
+reports covering the full request. Cumulative per-page checkpoints support restart.
+
+Research loading validates identity/integrity and uses Parquet predicates for
+interval and availability selection. Both typed and Pandas interfaces enforce
+explicit UTC cutoffs. Existing causal signal contracts have not changed.
+Corrected values carry new observation times and cannot leak into earlier replay.
+Historical REST provides no original publication-vintage evidence; the default is
+conservative observation-time availability, which prevents strict replay before
+acquisition. Prospective vintages or an explicitly justified future availability
+model are needed for that use case. Full operational details and limitations are
+in [the data guide](market-data.md).

@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "Typed foundations for reproducible cryptocurrency research"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic>=2.10,<3", "PyYAML>=6.0.2,<7"]
+dependencies = ["pydantic>=2.10,<3", "PyYAML>=6.0.2,<7", "ccxt>=4.4,<5", "numpy>=2,<3", "pandas>=2.2,<3", "pyarrow>=19,<24"]
 
 [project.optional-dependencies]
 research = ["numpy>=2,<3", "pandas>=2.2,<3", "TA-Lib>=0.6.5,<0.7", "vectorbt>=0.28,<0.29", "scipy>=1.14,<2", "scikit-learn>=1.6,<2", "cvxpy>=1.6,<2", "pyarrow>=19,<24"]
 ingestion = ["ccxt>=4.4,<5"]
 
 [dependency-groups]
-dev = ["pytest>=8.3,<9", "pytest-cov>=6,<7", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6,<7"]
+dev = ["pytest>=8.3,<9", "pytest-cov>=6,<7", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6,<7", "pandas-stubs>=2.2,<3"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crypto_research"]
@@ -34,4 +34,9 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live: explicitly opt-in Binance public API smoke test"]
 addopts = "--strict-markers --cov=crypto_research --cov-report=term-missing --cov-report=xml --cov-fail-under=90"
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*", "ccxt", "ccxt.*"]
+ignore_missing_imports = true
