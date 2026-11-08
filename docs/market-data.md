@@ -214,7 +214,8 @@ The system supports reproducible storage and causal access for future research.
 It cannot retrospectively prove the first publication time of old exchange data.
 Strict historical decision reconstruction needs prospectively captured vintages
 or a separately justified, explicit availability model before backtesting early
-periods. No such model or backtesting engine is included here.
+periods. No such availability model is implemented; the separate backtesting engine
+preserves this conservative boundary.
 
 ## Tests
 

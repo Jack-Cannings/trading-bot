@@ -25,3 +25,14 @@ jobs:
         with:
           name: coverage-${{ matrix.os }}
           path: coverage.xml
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --locked --extra reference
+      - run: uv run --offline --no-sync pytest tests/integration/test_vectorbt_reference.py --no-cov
