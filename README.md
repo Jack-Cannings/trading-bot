@@ -2,8 +2,9 @@
 
 Python 3.12 cryptocurrency quantitative research infrastructure. The package is
 `crypto_research`. It provides validated contracts, configuration, public Binance
-OHLCV ingestion and immutable local Parquet storage. It contains no strategies,
-backtesting calculations, order submission or profitability claims.
+OHLCV ingestion, immutable local Parquet storage and deterministic offline
+portfolio backtesting. It contains no trading algorithms, real order submission
+or profitability claims.
 
 ## Installation
 
@@ -96,3 +97,31 @@ Historical REST data cannot establish original publication time. Research loader
 use recorded exchange observation times and require an explicit cutoff. Data
 observed today cannot be used at yesterday's cutoff; prospective vintages or an
 explicit, justified availability model are needed for strict early-period replay.
+
+## Offline portfolio backtesting
+
+```sh
+uv run --offline --no-sync python -m crypto_research.backtesting.cli demo
+```
+
+The demo uses predetermined synthetic inputs and no network. The reusable engine
+accepts existing `MarketData`, `StrategyConfig` and `TargetExposure` records,
+executes at eligible next-candle opens and maintains a shared Decimal cash/asset
+ledger. It supports multi-asset target rebalances, explicit fees/slippage,
+passive benchmarks, shadow simulations and separate decision/outcome records.
+
+Read [the backtesting guide](docs/backtesting.md) for accounting conventions,
+strategy replay integration, missing/stale-price behavior and research limits.
+A historical publication timestamp remains required for strict causal replay;
+the engine does not backdate downloaded data. Simulated open quotes and fixed
+slippage do not reconstruct exchange order books or establish live readiness.
+
+Optional independent VectorBT reference check:
+
+```sh
+uv sync --locked --extra reference
+uv run --offline --no-sync pytest tests/integration/test_vectorbt_reference.py --no-cov
+```
+
+The default environment skips that comparison; CI also runs it in a separate
+Linux reference job. VectorBT and Plotly are not imported by the engine.

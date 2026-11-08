@@ -1,1 +1,1 @@
-"""Backtesting package; see architecture documentation."""
+"""Deterministic offline portfolio simulation; see docs/backtesting.md."""

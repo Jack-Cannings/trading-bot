@@ -2,9 +2,9 @@
 
 The platform defines validated research records, YAML configuration, a strategy
 interface and historical public market-data ingestion with immutable local
-Parquet storage. It contains no indicators, trading algorithms, backtesting
-calculations, optimization, classifiers, predictive models, databases or execution
-clients. Python 3.12 is the initial supported interpreter.
+Parquet storage, plus deterministic offline portfolio backtesting. It contains
+no indicators, trading algorithms, optimization, classifiers, predictive models,
+databases or live execution clients. Python 3.12 is the initial supported interpreter.
 
 ```mermaid
 flowchart LR
@@ -111,7 +111,8 @@ exposure, cash allocation, trading costs and drawdown. `shadow=True` marks
 observed simulated performance for an inactive strategy. Availability must follow
 the measurement period. Cash and costs are in the experiment's base currency;
 returns and drawdowns are fractions, drawdown a nonnegative magnitude. Values
-are supplied by future accounting, not calculated or reconciled here.
+will be derived from backtesting ledger/equity records by a future reporting
+adapter; the strategy-performance schema itself does not calculate them.
 
 `DecisionInputs` accepts market history, observable features and already available
 performance records. Availability is bounded by the decision cutoff. It has no
@@ -192,3 +193,35 @@ conservative observation-time availability, which prevents strict replay before
 acquisition. Prospective vintages or an explicitly justified future availability
 model are needed for that use case. Full operational details and limitations are
 in [the data guide](market-data.md).
+
+## Backtesting implementation
+
+The offline backtesting engine now separates existing strategy/replay inputs,
+full portfolio targets, next-open order simulation, Decimal accounting and
+immutable results. See [the backtesting guide](backtesting.md) for the exact
+execution and precision conventions.
+
+```mermaid
+flowchart LR
+    Historical[Historical data and availability] --> Signals[Strategy signals]
+    Signals --> Target[Target portfolio]
+    Target --> Execution[Order simulation]
+    Execution --> Ledger[Accounting]
+    Ledger --> Equity[Equity and results]
+```
+
+The strategy sees only point-in-time completed-candle snapshots. The broker's
+preloaded opening-price tape remains separate and supplies no future candle
+features to strategy code. Common eligible opens synchronize multi-asset trades;
+missing opens reject or defer within a configured bound. Cash-safe sells precede
+scaled buys, and weighted-average basis/quote fees reconcile net equity with
+realized and unrealized P&L. A separate zero-cost simulation defines gross
+performance, while actual fees/slippage and turnover remain explicit records.
+
+Decision/configuration objects remain independent of fills and subsequent equity
+outcomes. Shadow runs allocate isolated simulated capital. Future adaptive
+allocation can aggregate strategy-by-market sleeves into portfolio targets while
+retaining attribution; no such selector, sleeve allocator, optimizer or statistical
+ranking system is implemented. Reproducible research requires defensible data
+vintages; successful deterministic simulation is not evidence of realistic live
+execution or profitability.
