@@ -224,6 +224,8 @@ def test_unavailable_grid_is_durable_and_never_performance(tmp_path: Path) -> No
         a.status == "unavailable" and a.execution_id is None for a in attempts
     )
     assert len(registry.list()) == 0
+    text = (report / "report.md").read_text(encoding="utf-8")
+    assert "|\n|---" in text and "|\n\n|" not in text
     assert all(
         "total_net_return" not in row
         for row in json.loads((report / "numerical-results.json").read_text())

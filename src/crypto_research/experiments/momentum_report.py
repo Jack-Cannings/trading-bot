@@ -605,7 +605,8 @@ def write_report(
     )
     if any(a.status == "completed" for a in attempts):
         lines.extend(descriptive_findings(table, matched, diagnostics))
-    (root / "report.md").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
+    text = "\n\n".join(lines).replace("|\n\n|", "|\n|")
+    (root / "report.md").write_text(text + "\n", encoding="utf-8")
     manifest = {
         p.name: checksum(p)
         for p in sorted(root.iterdir())
