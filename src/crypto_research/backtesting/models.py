@@ -144,6 +144,8 @@ class PositionValue(Record):
 
 class EquityPoint(Record):
     timestamp: datetime
+    pre_execution_equity: Nonnegative | None = None
+    pre_execution_gross_equity: Nonnegative | None = None
     cash: Nonnegative
     holdings_value: Nonnegative
     equity: Nonnegative
@@ -169,10 +171,17 @@ class TargetOutcome(Record):
     reason: str | None = None
 
 
+class DataGap(Record):
+    market: Market
+    period: Period
+
+
 class BacktestResult(Record):
+    schema_version: Literal[1] = 1
     run_id: Identifier
     settings: SimulationSettings
     data_identities: tuple[str, ...]
+    data_gaps: tuple[DataGap, ...] = ()
     decisions: tuple[PortfolioTarget, ...]
     target_outcomes: tuple[TargetOutcome, ...]
     orders: tuple[Order, ...]

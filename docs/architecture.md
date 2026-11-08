@@ -2,9 +2,10 @@
 
 The platform defines validated research records, YAML configuration, a strategy
 interface and historical public market-data ingestion with immutable local
-Parquet storage, plus deterministic offline portfolio backtesting. It contains
-no indicators, trading algorithms, optimization, classifiers, predictive models,
-databases or live execution clients. Python 3.12 is the initial supported interpreter.
+Parquet storage, deterministic offline portfolio backtesting, descriptive trailing
+features, performance analytics and a local SQLite experiment registry. It contains
+no trading algorithms, optimization, classifiers, predictive models or live
+execution clients. Python 3.12 is the initial supported interpreter.
 
 ```mermaid
 flowchart LR
@@ -35,9 +36,9 @@ here. `config` loads settings; `contracts.py` defines shared records;
 `strategies/base.py` defines the protocol and point-in-time replay helper.
 `data` implements provider boundaries, validation, immutable storage, incremental
 updates and an explicit CLI; see [market-data design](market-data.md).
-Existing small package markers reserve data, backtesting, metrics, experiments,
-validation and portfolio responsibilities. Features, regimes and selection can
-become packages when their first implementations are needed.
+The `features`, `metrics`, `experiments` and `validation` modules now implement
+point-in-time descriptors, analytics, local trial persistence and dataset/leakage
+checks. Regime analysis, selection and portfolio allocation remain future work.
 
 ## Causal market data
 
@@ -104,15 +105,16 @@ management and accounting.
 `MarketFeature` represents an observable named, versioned value, with source-data
 and availability timestamps. A retrospective regime classification is not an
 observable feature unless it can be reproduced using only information then
-available. No indicator calculations or regime classifications exist yet.
+available. The initial descriptive return, volatility, moving-average deviation,
+drawdown and volume features are implemented; regime classifiers are not.
 
 `StrategyPerformance` records periodic gross/net returns, position, target
 exposure, cash allocation, trading costs and drawdown. `shadow=True` marks
 observed simulated performance for an inactive strategy. Availability must follow
 the measurement period. Cash and costs are in the experiment's base currency;
 returns and drawdowns are fractions, drawdown a nonnegative magnitude. Values
-will be derived from backtesting ledger/equity records by a future reporting
-adapter; the strategy-performance schema itself does not calculate them.
+are derived from backtesting ledger/equity records by research exports; the
+original generic strategy-performance schema itself does not calculate them.
 
 `DecisionInputs` accepts market history, observable features and already available
 performance records. Availability is bounded by the decision cutoff. It has no
@@ -128,7 +130,9 @@ and the required data is available. Store labels separately from decision-input
 artifacts. A future training builder may join them offline; live selection must
 accept only `DecisionInputs`, never the joined training records. Purge labels
 whose horizons overlap validation/test boundaries and embargo when appropriate.
-No label generation or predictive dataset builder is implemented in this task.
+The separate research `OutcomeRecord` now labels 1/7/30-day simulated strategy
+performance with these causal boundaries. No predictive training-dataset join or
+model is implemented; labels never enter live decision-input contracts.
 
 ## Experiments and research process
 
@@ -140,8 +144,10 @@ optional seed, explicit cost assumptions and result artifacts. Failed runs must
 record a failure reason; successful runs cannot carry one. Artifact experiment
 identifiers must match. Persist the full experiment config, metadata, lockfile
 and environment alongside artifacts in future orchestration, and verify hashes
-when loading. Experiment execution/storage is not implemented here; the separate market-data
-store now verifies persisted dataset versions and their Parquet content.
+when loading. The market-data store verifies source versions and Parquet content.
+The new isolated research runner and SQLite registry persist immutable
+`ExperimentSpec` inputs, distinct execution attempts and verified artifacts; these
+complement the original generic experiment metadata contracts.
 
 The planned research loop is:
 
@@ -225,3 +231,45 @@ retaining attribution; no such selector, sleeve allocator, optimizer or statisti
 ranking system is implemented. Reproducible research requires defensible data
 vintages; successful deterministic simulation is not evidence of realistic live
 execution or profitability.
+
+## Research implementation
+
+The narrow experiment runner evaluates one strategy/configuration/market at a
+time using exact source versions, the existing replay adapter and existing
+portfolio accounting. It also supports cash and buy-and-hold baselines. Shadow
+runs have independent simulated capital; their curves cannot be added to assert
+an executable shared portfolio. No adaptive allocator or real algorithm is
+implemented.
+
+```mermaid
+flowchart LR
+    Source[Historical dataset version] --> Features[Available market features]
+    Source --> Decisions[Strategy decisions]
+    Features --> Inputs[Decision-time records]
+    Decisions --> Inputs
+    Decisions --> Backtest[Backtest]
+    Backtest --> Returns[Simulated strategy returns]
+    Returns --> Metrics[Performance metrics]
+    Returns --> Outcomes[Separate future outcomes]
+    Inputs --> InputParquet[decisions.parquet]
+    Outcomes --> OutcomeParquet[outcomes.parquet]
+    Metrics --> SQLite[SQLite registry and artifact references]
+```
+
+Metrics use an explicit bounded fixed-frequency valuation grid for periodic risk
+statistics and elapsed time for CAGR. Undefined ratios retain missing values and
+reasons. Descriptive features require completed, available, contiguous trailing
+windows and preserve missing-history flags. Outcome labels use pre-execution
+endpoint equity and half-open fill costs; required source/performance gaps leave
+labels incomplete. Additive backtest fields expose those pre-execution values
+and source coverage gaps without changing strategy interfaces or accounting.
+
+SQLite records each execution lifecycle, including failures/cancellations, while
+immutable artifact directories separate decisions, future labels, performance
+and fills. Full verification recomputes metrics/outcomes from saved simulation
+records before an atomic database completion transaction. Source versions and
+configuration hashes prevent silent revision substitution. Comparison groups
+identify incompatible assumptions and overlapping evaluation periods; label-split
+validation rejects cross-fold overlapping horizons. No statistical significance
+or automatic promotion is claimed. See [the research guide](research.md) for
+formulas, schemas, commands and practical limits.

@@ -18,6 +18,7 @@ from crypto_research.backtesting.accounting import (
 )
 from crypto_research.backtesting.models import (
     BacktestResult,
+    DataGap,
     EquityPoint,
     Fill,
     Instruction,
@@ -29,7 +30,7 @@ from crypto_research.backtesting.models import (
     SimulationSettings,
     TargetOutcome,
 )
-from crypto_research.contracts import Candle, Market, MarketData, SignalBatch
+from crypto_research.contracts import Candle, Market, MarketData, Period, SignalBatch
 from crypto_research.data.models import aligned
 from crypto_research.strategies.base import Strategy, reconstruct
 
@@ -285,6 +286,8 @@ def _run(
         if timestamp < settings.period.end:
             for candle in data.opens.get(timestamp, ()):
                 marks[candle.market] = Decimal(str(candle.open)), candle.open_time
+        pre_execution_equity = account.cash + _holdings(account, marks, timestamp)
+        pre_execution_gross_equity = gross.cash + _holdings(gross, marks, timestamp)
         if timestamp in decisions:
             target = decisions[timestamp]
             weights = _weights(target)
@@ -356,6 +359,8 @@ def _run(
         points.append(
             EquityPoint(
                 timestamp=timestamp,
+                pre_execution_equity=pre_execution_equity,
+                pre_execution_gross_equity=pre_execution_gross_equity,
                 cash=account.cash,
                 holdings_value=holdings,
                 equity=equity,
@@ -373,6 +378,23 @@ def _run(
             )
         )
         prior_net, prior_gross = equity, gross_equity
+    gaps: list[DataGap] = []
+    for history in data.histories:
+        cursor = settings.period.start
+        for candle in history.candles:
+            if candle.close_time <= cursor or candle.open_time >= settings.period.end:
+                continue
+            if candle.open_time > cursor:
+                gaps.append(
+                    DataGap(
+                        market=history.market, period=Period(start=cursor, end=candle.open_time)
+                    )
+                )
+            cursor = max(cursor, min(candle.close_time, settings.period.end))
+        if cursor < settings.period.end:
+            gaps.append(
+                DataGap(market=history.market, period=Period(start=cursor, end=settings.period.end))
+            )
     run_id = hashlib.sha256(
         (
             settings.identity + "".join(data.identities) + "".join(t.identity for t in targets)
@@ -382,6 +404,7 @@ def _run(
         run_id=run_id,
         settings=settings,
         data_identities=data.identities,
+        data_gaps=tuple(gaps),
         decisions=targets,
         target_outcomes=tuple(sorted(outcomes, key=lambda o: o.decision_at)),
         orders=tuple(orders),

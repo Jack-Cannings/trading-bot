@@ -1,1 +1,1 @@
-"""Metrics package; see architecture documentation."""
+"""Validated portfolio analytics with explicit sampling and undefined metrics."""
